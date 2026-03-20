@@ -397,6 +397,10 @@ importers:
         version: 3.25.76
 
   artifacts/save-that:
+    dependencies:
+      fix-webm-duration:
+        specifier: ^1.0.6
+        version: 1.0.6
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -2184,6 +2188,9 @@ packages:
   find-up@8.0.0:
     resolution: {integrity: sha512-JGG8pvDi2C+JxidYdIwQDyS/CgcrIdh18cvgxcBge3wSHRQOrooMD3GlFBcmMJAN9M42SAZjDp5zv1dglJjwww==}
     engines: {node: '>=20'}
+
+  fix-webm-duration@1.0.6:
+    resolution: {integrity: sha512-zVAqi4gE+8ywxJuAyV/rlJVX6CMtvyapEbQx6jyoeX9TMjdqAlt/FdG5d7rXSSkDVzTvS0H7CtwzHcH/vh4FPA==}
 
   forwarded@0.2.0:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
@@ -4785,6 +4792,8 @@ snapshots:
     dependencies:
       locate-path: 8.0.0
       unicorn-magic: 0.3.0
+
+  fix-webm-duration@1.0.6: {}
 
   forwarded@0.2.0: {}
 

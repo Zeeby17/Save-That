@@ -1,5 +1,7 @@
 import { useCallback } from "react";
 import { clipStorage } from "@/utils/clipStorage";
+// @ts-ignore — no types for this package
+import fixWebmDuration from "fix-webm-duration";
 
 export function useSaveClips(
   getChunks: () => { blob: Blob; time: number }[],
@@ -9,10 +11,7 @@ export function useSaveClips(
 ) {
   const saveLastSeconds = useCallback(
     (seconds: number, onDone?: (success: boolean) => void) => {
-      // First flush any uncommitted buffered data from the recorder,
-      // then build the clip. This fixes "videos cut short" by capturing
-      // the last partial second that hadn't been committed yet.
-      requestFlushAndGet(() => {
+      requestFlushAndGet(async () => {
         const now = Date.now();
         const cutoff = now - seconds * 1000;
         const chunks = getChunks().filter((c) => c.time >= cutoff);
@@ -23,15 +22,22 @@ export function useSaveClips(
           return;
         }
 
-        // Always prepend the init segment so the browser (and Samsung video editor)
-        // can decode the video. Without it you get rainbow pixel artifacts and
-        // the editor can't determine duration or seek properly.
-        const allBlobs = [initChunk, ...chunks.map((c) => c.blob)];
-        const blob = new Blob(allBlobs, { type: mimeType || "video/webm" });
         const actualDuration = (now - chunks[0].time) / 1000;
-        const clip = clipStorage.save(blob, actualDuration, mimeType || "video/webm");
+        const allBlobs = [initChunk, ...chunks.map((c) => c.blob)];
+        let blob = new Blob(allBlobs, { type: mimeType || "video/webm" });
+
+        // Fix WebM duration metadata so Samsung Gallery / native editors
+        // show the correct time and allow trimming/editing
+        if (blob.type.includes("webm")) {
+          try {
+            blob = await fixWebmDuration(blob, actualDuration * 1000);
+          } catch {
+            // If fix fails, continue with the original blob
+          }
+        }
+
+        clipStorage.save(blob, actualDuration, mimeType || "video/webm");
         onDone?.(true);
-        return clip;
       });
     },
     [getChunks, getInitChunk, mimeType, requestFlushAndGet]
