@@ -131,7 +131,7 @@ export default function SettingsPage() {
         <div className="flex items-center gap-2">
           <AppIcon size={22} />
           <h1 className="font-black uppercase tracking-wide text-base"
-            style={{ color: "#FFB800", fontFamily: "Impact, Arial Black, sans-serif", WebkitTextStroke: "1px #3C096C" }}>
+            style={{ color: "#7B2FBE", fontFamily: "Impact, Arial Black, sans-serif", WebkitTextStroke: "0.5px rgba(255,140,0,0.5)" }}>
             SETTINGS
           </h1>
         </div>

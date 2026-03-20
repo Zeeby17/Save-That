@@ -130,22 +130,12 @@ export default function CameraPage() {
           />
         )}
 
-        {/* TOP LEFT: Logo + Timer */}
-        <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/50 rounded-xl px-3 py-2 backdrop-blur-sm">
-          <AppIcon size={22} />
-          <span
-            className="font-black uppercase tracking-wide text-sm"
-            style={{
-              color: "#FFB800",
-              WebkitTextStroke: "1px #3C096C",
-              fontFamily: "Impact, Arial Black, sans-serif",
-            }}
-          >
-            SAVE THAT
-          </span>
-          <div className="flex items-center gap-1.5 ml-1">
+        {/* TOP LEFT: Watermark badge (imprinted on video like TikTok/Instagram) + rec timer */}
+        <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start">
+          <Watermark />
+          <div className="flex items-center gap-1.5 pl-1">
             <span className="rec-dot w-2 h-2 rounded-full bg-red-500 inline-block" />
-            <span className="text-white/80 text-xs font-mono">{formatTime(elapsedSeconds)}</span>
+            <span className="text-white/70 text-xs font-mono drop-shadow">{formatTime(elapsedSeconds)}</span>
           </div>
         </div>
 
@@ -206,11 +196,6 @@ export default function CameraPage() {
           className="absolute bottom-4 right-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white">
           <SwitchCamera className="w-5 h-5" />
         </button>
-
-        {/* WATERMARK - bottom center of video like TikTok/Instagram */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-          <Watermark />
-        </div>
 
         {/* SAVE FLASH */}
         {saveFlash && (

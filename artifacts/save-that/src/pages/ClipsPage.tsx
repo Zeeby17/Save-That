@@ -169,9 +169,9 @@ export default function ClipsPage() {
           <h1
             className="font-black uppercase tracking-wide text-base"
             style={{
-              color: "#FFB800",
+              color: "#7B2FBE",
               fontFamily: "Impact, Arial Black, sans-serif",
-              WebkitTextStroke: "1px #3C096C",
+              WebkitTextStroke: "0.5px rgba(255,140,0,0.5)",
             }}
           >
             TIME SEGMENTS
