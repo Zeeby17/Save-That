@@ -28,6 +28,9 @@ export function useCamera(bufferSeconds = 600) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // The very first chunk from MediaRecorder contains codec/header init data.
+  // We must keep it and prepend to every saved clip or the video is unplayable.
+  const initChunkRef = useRef<Blob | null>(null);
   const chunksRef = useRef<{ blob: Blob; time: number }[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -71,10 +74,19 @@ export function useCamera(bufferSeconds = 600) {
         const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
         mediaRecorderRef.current = recorder;
         chunksRef.current = [];
+        initChunkRef.current = null;
 
+        let isFirstChunk = true;
         recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            const now = Date.now();
+          if (!e.data || e.data.size === 0) return;
+          const now = Date.now();
+
+          if (isFirstChunk) {
+            // First chunk = initialization segment (WebM headers/codec info)
+            // Store separately and always prepend to every saved clip
+            initChunkRef.current = e.data;
+            isFirstChunk = false;
+          } else {
             chunksRef.current.push({ blob: e.data, time: now });
             const cutoff = now - bufferSeconds * 1000;
             chunksRef.current = chunksRef.current.filter((c) => c.time >= cutoff);
@@ -119,14 +131,13 @@ export function useCamera(bufferSeconds = 600) {
   );
 
   const getChunks = useCallback(() => chunksRef.current, []);
-
+  const getInitChunk = useCallback(() => initChunkRef.current, []);
   const getStream = useCallback(() => streamRef.current, []);
 
   useEffect(() => {
     startCamera();
-    return () => {
-      stopCamera();
-    };
+    return () => { stopCamera(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -138,9 +149,7 @@ export function useCamera(bufferSeconds = 600) {
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isRecording]);
 
   return {
@@ -156,6 +165,7 @@ export function useCamera(bufferSeconds = 600) {
     mimeType,
     error,
     getChunks,
+    getInitChunk,
     getStream,
     startCamera,
     stopCamera,

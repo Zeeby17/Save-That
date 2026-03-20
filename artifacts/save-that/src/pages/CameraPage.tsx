@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Settings, Images, Music, SwitchCamera, ChevronDown } from "lucide-react";
-import { AppIcon } from "@/components/AppIcon";
+import { AppIcon, Watermark } from "@/components/AppIcon";
 import { AudioVisualization } from "@/components/AudioVisualization";
 import { TimeSegmentButtons } from "@/components/TimeSegmentButtons";
 import { useCamera, VideoQuality, CropMode } from "@/hooks/useCamera";
@@ -36,6 +36,8 @@ function formatTime(s: number): string {
 export default function CameraPage() {
   const [, navigate] = useLocation();
   const bufferMinutes = parseInt(localStorage.getItem("bufferMinutes") || "10");
+  const autoDownload = localStorage.getItem("autoDownload") === "true";
+
   const {
     videoRef,
     isRecording,
@@ -48,6 +50,7 @@ export default function CameraPage() {
     mimeType,
     error,
     getChunks,
+    getInitChunk,
     getStream,
   } = useCamera(bufferMinutes * 60);
 
@@ -60,7 +63,7 @@ export default function CameraPage() {
 
   const stream = getStream();
   const { audioData } = useAudioAnalysis(stream, soundBarEnabled && isRecording);
-  const { saveLastSeconds } = useSaveClips(getChunks, mimeType);
+  const { saveLastSeconds } = useSaveClips(getChunks, getInitChunk, mimeType);
 
   const qualityRef = useRef<HTMLDivElement>(null);
   const cropRef = useRef<HTMLDivElement>(null);
@@ -80,10 +83,18 @@ export default function CameraPage() {
     const clip = saveLastSeconds(seconds);
     if (clip) {
       const label = seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
-      setSaveFlash(`Saved last ${label}!`);
-      setTimeout(() => setSaveFlash(null), 2000);
+      setSaveFlash(`✓ Saved last ${label}`);
+      setTimeout(() => setSaveFlash(null), 2500);
+
+      // Auto-download to device if enabled
+      if (autoDownload) {
+        const a = document.createElement("a");
+        a.href = clip.url;
+        a.download = `save-that-${clip.timestamp.getTime()}.webm`;
+        a.click();
+      }
     } else {
-      setSaveFlash("Not enough footage yet");
+      setSaveFlash("Recording still starting…");
       setTimeout(() => setSaveFlash(null), 2000);
     }
   };
@@ -125,7 +136,7 @@ export default function CameraPage() {
           <span
             className="font-black uppercase tracking-wide text-sm"
             style={{
-              color: "#FF8C00",
+              color: "#FFB800",
               WebkitTextStroke: "1px #3C096C",
               fontFamily: "Impact, Arial Black, sans-serif",
             }}
@@ -140,7 +151,6 @@ export default function CameraPage() {
 
         {/* TOP RIGHT: Quality + Crop */}
         <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
-          {/* Quality dropdown */}
           <div ref={qualityRef} className="relative">
             <button
               onClick={() => { setShowQualityMenu((v) => !v); setShowCropMenu(false); }}
@@ -152,12 +162,9 @@ export default function CameraPage() {
               <div className="absolute right-0 top-9 z-50 rounded-xl overflow-hidden shadow-xl"
                 style={{ background: "#2D0060" }}>
                 {QUALITY_OPTIONS.map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => { setQuality(q); setShowQualityMenu(false); }}
+                  <button key={q} onClick={() => { setQuality(q); setShowQualityMenu(false); }}
                     className="block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors"
-                    style={{ color: q === quality ? "#FF8C00" : "white" }}
-                  >
+                    style={{ color: q === quality ? "#FFB800" : "white" }}>
                     {q}
                   </button>
                 ))}
@@ -165,7 +172,6 @@ export default function CameraPage() {
             )}
           </div>
 
-          {/* Crop dropdown */}
           <div ref={cropRef} className="relative">
             <button
               onClick={() => { setShowCropMenu((v) => !v); setShowQualityMenu(false); }}
@@ -177,12 +183,9 @@ export default function CameraPage() {
               <div className="absolute right-0 top-9 z-50 rounded-xl overflow-hidden shadow-xl"
                 style={{ background: "#2D0060" }}>
                 {CROP_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => { setCropMode(o.value); setShowCropMenu(false); }}
+                  <button key={o.value} onClick={() => { setCropMode(o.value); setShowCropMenu(false); }}
                     className="block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors"
-                    style={{ color: o.value === cropMode ? "#FF8C00" : "white" }}
-                  >
+                    style={{ color: o.value === cropMode ? "#FFB800" : "white" }}>
                     {o.label}
                   </button>
                 ))}
@@ -191,26 +194,27 @@ export default function CameraPage() {
           </div>
         </div>
 
-        {/* BOTTOM LEFT: Sound bar toggle */}
-        <button
-          onClick={toggleSoundBar}
+        {/* BOTTOM LEFT on video: Sound bar toggle */}
+        <button onClick={toggleSoundBar}
           className="absolute bottom-4 left-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
-          style={{ color: soundBarEnabled ? "#FF8C00" : "white" }}
-        >
+          style={{ color: soundBarEnabled ? "#FFB800" : "rgba(255,255,255,0.5)" }}>
           <Music className="w-5 h-5" />
         </button>
 
-        {/* BOTTOM RIGHT: Switch camera */}
-        <button
-          onClick={switchCamera}
-          className="absolute bottom-4 right-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white"
-        >
+        {/* BOTTOM RIGHT on video: Switch camera */}
+        <button onClick={switchCamera}
+          className="absolute bottom-4 right-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white">
           <SwitchCamera className="w-5 h-5" />
         </button>
 
+        {/* WATERMARK - bottom center of video like TikTok/Instagram */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+          <Watermark />
+        </div>
+
         {/* SAVE FLASH */}
         {saveFlash && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white text-sm font-bold rounded-xl px-6 py-3 backdrop-blur-sm z-50 pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/85 text-white text-sm font-bold rounded-xl px-6 py-3 backdrop-blur-sm z-50 pointer-events-none">
             {saveFlash}
           </div>
         )}
@@ -224,19 +228,12 @@ export default function CameraPage() {
         {soundBarEnabled && <AudioVisualization audioData={audioData} />}
         <TimeSegmentButtons onSave={handleSave} />
 
-        {/* Bottom nav row */}
         <div className="flex justify-between items-center mt-1">
-          <button
-            onClick={() => navigate("/settings")}
-            className="p-2.5 rounded-full bg-black/50"
-          >
-            <Settings className="w-5 h-5" style={{ color: "#FF8C00" }} />
+          <button onClick={() => navigate("/settings")} className="p-2.5 rounded-full bg-black/50">
+            <Settings className="w-5 h-5" style={{ color: "#FFB800" }} />
           </button>
-          <button
-            onClick={() => navigate("/clips")}
-            className="p-2.5 rounded-full bg-black/50"
-          >
-            <Images className="w-5 h-5" style={{ color: "#FF8C00" }} />
+          <button onClick={() => navigate("/clips")} className="p-2.5 rounded-full bg-black/50">
+            <Images className="w-5 h-5" style={{ color: "#FFB800" }} />
           </button>
         </div>
       </div>
