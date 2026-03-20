@@ -7,6 +7,7 @@ import { TimeSegmentButtons } from "@/components/TimeSegmentButtons";
 import { useCamera, VideoQuality, CropMode } from "@/hooks/useCamera";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
 import { useSaveClips } from "@/hooks/useSaveClips";
+import { clipStorage } from "@/utils/clipStorage";
 
 const QUALITY_OPTIONS: VideoQuality[] = ["420p", "720p", "1080p", "4K"];
 const CROP_OPTIONS: { label: string; value: CropMode }[] = [
@@ -52,6 +53,7 @@ export default function CameraPage() {
     getChunks,
     getInitChunk,
     getStream,
+    requestFlushAndGet,
   } = useCamera(bufferMinutes * 60);
 
   const [soundBarEnabled, setSoundBarEnabled] = useState(
@@ -63,7 +65,7 @@ export default function CameraPage() {
 
   const stream = getStream();
   const { audioData } = useAudioAnalysis(stream, soundBarEnabled && isRecording);
-  const { saveLastSeconds } = useSaveClips(getChunks, getInitChunk, mimeType);
+  const { saveLastSeconds } = useSaveClips(getChunks, getInitChunk, mimeType, requestFlushAndGet);
 
   const qualityRef = useRef<HTMLDivElement>(null);
   const cropRef = useRef<HTMLDivElement>(null);
@@ -80,23 +82,33 @@ export default function CameraPage() {
   }, []);
 
   const handleSave = (seconds: number) => {
-    const clip = saveLastSeconds(seconds);
-    if (clip) {
-      const label = seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
-      setSaveFlash(`✓ Saved last ${label}`);
-      setTimeout(() => setSaveFlash(null), 2500);
+    const label = seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
+    setSaveFlash(`⏳ Saving last ${label}…`);
 
-      // Auto-download to device if enabled
-      if (autoDownload) {
-        const a = document.createElement("a");
-        a.href = clip.url;
-        a.download = `save-that-${clip.timestamp.getTime()}.webm`;
-        a.click();
+    saveLastSeconds(seconds, (success) => {
+      if (success) {
+        setSaveFlash(`✓ Saved last ${label}`);
+        setTimeout(() => setSaveFlash(null), 2500);
+
+        if (autoDownload) {
+          // Get the most recently saved clip and download it
+          const clips = clipStorage.getAll();
+          if (clips.length > 0) {
+            const latest = clips[0];
+            const ext = latest.mimeType.includes("mp4") ? "mp4" : "webm";
+            const a = document.createElement("a");
+            a.href = latest.url;
+            a.download = `save-that-${latest.timestamp.getTime()}.${ext}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        }
+      } else {
+        setSaveFlash("Recording still starting…");
+        setTimeout(() => setSaveFlash(null), 2000);
       }
-    } else {
-      setSaveFlash("Recording still starting…");
-      setTimeout(() => setSaveFlash(null), 2000);
-    }
+    });
   };
 
   const toggleSoundBar = () => {

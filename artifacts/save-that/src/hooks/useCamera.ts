@@ -10,15 +10,26 @@ const QUALITY_CONSTRAINTS: Record<VideoQuality, { width: number; height: number 
   "4K": { width: 3840, height: 2160 },
 };
 
+// Prefer MP4 on Android (Samsung, Pixel, etc.) for native video editor compatibility.
+// WebM is fine for desktop Chrome but breaks Samsung's editor.
 function detectMimeType(): string {
-  const types = [
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const androidFirst = [
+    "video/mp4;codecs=avc1,mp4a.40.2",
+    "video/mp4",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+  const desktopFirst = [
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm;codecs=h264,opus",
     "video/webm",
     "video/mp4",
   ];
-  for (const type of types) {
+  const order = isAndroid ? androidFirst : desktopFirst;
+  for (const type of order) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
   return "";
@@ -28,11 +39,10 @@ export function useCamera(bufferSeconds = 600) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // The very first chunk from MediaRecorder contains codec/header init data.
-  // We must keep it and prepend to every saved clip or the video is unplayable.
+  // First chunk = codec init/header segment — must be prepended to every saved clip
   const initChunkRef = useRef<Blob | null>(null);
   const chunksRef = useRef<{ blob: Blob; time: number }[]>([]);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const flushCallbackRef = useRef<(() => void) | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
@@ -41,6 +51,7 @@ export function useCamera(bufferSeconds = 600) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [mimeType, setMimeType] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startCamera = useCallback(
     async (fm: "environment" | "user" = facingMode, q: VideoQuality = quality) => {
@@ -82,18 +93,29 @@ export function useCamera(bufferSeconds = 600) {
           const now = Date.now();
 
           if (isFirstChunk) {
-            // First chunk = initialization segment (WebM headers/codec info)
-            // Store separately and always prepend to every saved clip
+            // The very first chunk contains codec/container headers.
+            // Store it separately — it must be prepended to every saved clip
+            // or the video will be undecodable (rainbow artifacts, seek failures).
             initChunkRef.current = e.data;
             isFirstChunk = false;
           } else {
             chunksRef.current.push({ blob: e.data, time: now });
+            // Trim buffer to the configured max duration
             const cutoff = now - bufferSeconds * 1000;
             chunksRef.current = chunksRef.current.filter((c) => c.time >= cutoff);
           }
+
+          // If something is waiting for the next flush (save action), call it
+          if (flushCallbackRef.current) {
+            const cb = flushCallbackRef.current;
+            flushCallbackRef.current = null;
+            cb();
+          }
         };
 
-        recorder.start(1000);
+        // 500ms timeslice = 2 chunks/sec = smaller corruption window than 1s,
+        // and more keyframe opportunities for clean clip boundaries
+        recorder.start(500);
         setIsRecording(true);
         setError(null);
       } catch (err: unknown) {
@@ -128,6 +150,29 @@ export function useCamera(bufferSeconds = 600) {
       startCamera(facingMode, q);
     },
     [facingMode, startCamera]
+  );
+
+  // Flush any uncommitted data then call back — solves "videos cut short" issue.
+  // MediaRecorder buffers up to timeslice ms of data. Calling requestData()
+  // forces it to fire ondataavailable immediately with whatever it has.
+  const requestFlushAndGet = useCallback(
+    (onFlushed: () => void) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state !== "recording") {
+        onFlushed();
+        return;
+      }
+      flushCallbackRef.current = onFlushed;
+      recorder.requestData();
+      // Safety fallback in case requestData doesn't fire (shouldn't happen)
+      setTimeout(() => {
+        if (flushCallbackRef.current) {
+          flushCallbackRef.current = null;
+          onFlushed();
+        }
+      }, 300);
+    },
+    []
   );
 
   const getChunks = useCallback(() => chunksRef.current, []);
@@ -167,6 +212,7 @@ export function useCamera(bufferSeconds = 600) {
     getChunks,
     getInitChunk,
     getStream,
+    requestFlushAndGet,
     startCamera,
     stopCamera,
   };
