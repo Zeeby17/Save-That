@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Save That"
+version = "1.0.0"
+id = "artifacts/save-that"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22863
+
+[services.development]
+run = "pnpm --filter @workspace/save-that run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/save-that", "run", "build" ]
+publicDir = "artifacts/save-that/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22863"
+BASE_PATH = "/"
