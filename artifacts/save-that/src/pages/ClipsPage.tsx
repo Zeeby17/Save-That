@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { Camera, Download, Trash2, MoreVertical, Play, X, Film } from "lucide-react";
+import { Camera, Download, Trash2, MoreVertical, Play, X, Film, Scissors } from "lucide-react";
 import { AppIcon } from "@/components/AppIcon";
+import { TrimEditor } from "@/components/TrimEditor";
 import { clipStorage, StoredClip } from "@/utils/clipStorage";
 
 function formatDuration(s: number): string {
@@ -26,11 +27,13 @@ function ClipCard({
   onPlay,
   onExport,
   onDelete,
+  onTrim,
 }: {
   clip: StoredClip;
   onPlay: () => void;
   onExport: () => void;
   onDelete: () => void;
+  onTrim: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -49,7 +52,6 @@ function ClipCard({
       className="rounded-xl overflow-hidden"
       style={{ background: "rgba(60,9,108,0.45)", border: "1px solid rgba(255,184,0,0.12)" }}
     >
-      {/* Thumbnail / play area */}
       <div
         className="relative w-full aspect-video bg-black cursor-pointer group"
         onClick={onPlay}
@@ -65,13 +67,19 @@ function ClipCard({
         </div>
       </div>
 
-      {/* Metadata row */}
       <div className="flex items-center justify-between px-3 py-2.5">
         <div>
           <p className="text-white text-xs font-semibold">{formatTimestamp(clip.timestamp)}</p>
           <p className="text-white/45 text-xs">{formatDuration(clip.duration)} · {formatSize(clip.size)}</p>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={onTrim}
+            className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+            title="Trim & export"
+          >
+            <Scissors className="w-4 h-4" />
+          </button>
           <button
             onClick={onExport}
             className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors"
@@ -91,6 +99,12 @@ function ClipCard({
                 className="absolute right-0 bottom-10 z-50 rounded-xl overflow-hidden shadow-xl min-w-[140px]"
                 style={{ background: "#2D0060", border: "1px solid rgba(255,184,0,0.15)" }}
               >
+                <button
+                  onClick={() => { onTrim(); setMenuOpen(false); }}
+                  className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-white hover:bg-white/10 transition-colors"
+                >
+                  <Scissors className="w-4 h-4" /> Trim Clip
+                </button>
                 <button
                   onClick={() => { onExport(); setMenuOpen(false); }}
                   className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-white hover:bg-white/10 transition-colors"
@@ -116,6 +130,7 @@ export default function ClipsPage() {
   const [, navigate] = useLocation();
   const [clips, setClips] = useState<StoredClip[]>([]);
   const [activeClip, setActiveClip] = useState<StoredClip | null>(null);
+  const [trimClip, setTrimClip] = useState<StoredClip | null>(null);
   const playerRef = useRef<HTMLVideoElement>(null);
 
   const refresh = () => setClips(clipStorage.getAll());
@@ -127,7 +142,6 @@ export default function ClipsPage() {
     return () => window.removeEventListener("clipSaved", handler);
   }, []);
 
-  // When active clip changes, update the player source
   useEffect(() => {
     const video = playerRef.current;
     if (!video) return;
@@ -153,6 +167,7 @@ export default function ClipsPage() {
 
   const handleDelete = (clip: StoredClip) => {
     if (activeClip?.id === clip.id) setActiveClip(null);
+    if (trimClip?.id === clip.id) setTrimClip(null);
     clipStorage.delete(clip.id);
     refresh();
   };
@@ -168,11 +183,7 @@ export default function ClipsPage() {
           <AppIcon size={22} />
           <h1
             className="font-black uppercase tracking-wide text-base"
-            style={{
-              color: "#7B2FBE",
-              fontFamily: "Impact, Arial Black, sans-serif",
-              WebkitTextStroke: "0.5px rgba(255,140,0,0.5)",
-            }}
+            style={{ color: "#7B2FBE", fontFamily: "Impact, Arial Black, sans-serif", WebkitTextStroke: "0.5px rgba(255,140,0,0.5)" }}
           >
             TIME SEGMENTS
           </h1>
@@ -184,7 +195,7 @@ export default function ClipsPage() {
 
       <div className="flex-1 overflow-y-auto px-4 pb-6">
         {/* Inline video player */}
-        {activeClip && (
+        {activeClip && !trimClip && (
           <div className="mb-4 rounded-xl overflow-hidden bg-black relative">
             <video
               ref={playerRef}
@@ -204,9 +215,16 @@ export default function ClipsPage() {
               style={{ background: "rgba(60,9,108,0.8)" }}
             >
               <div className="text-xs text-white/60">
-                {formatTimestamp(activeClip.timestamp)} · {formatDuration(activeClip.duration)} · {formatSize(activeClip.size)}
+                {formatTimestamp(activeClip.timestamp)} · {formatDuration(activeClip.duration)}
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => { setTrimClip(activeClip); setActiveClip(null); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold"
+                  style={{ background: "rgba(255,184,0,0.2)", color: "#FFB800" }}
+                >
+                  <Scissors className="w-3.5 h-3.5" /> Trim
+                </button>
                 <button
                   onClick={() => handleExport(activeClip)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white"
@@ -222,6 +240,18 @@ export default function ClipsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Trim editor */}
+        {trimClip && (
+          <div className="mb-4">
+            <TrimEditor
+              url={trimClip.url}
+              mimeType={trimClip.mimeType}
+              filename={`save-that-${trimClip.timestamp.getTime()}`}
+              onClose={() => setTrimClip(null)}
+            />
           </div>
         )}
 
@@ -246,9 +276,10 @@ export default function ClipsPage() {
               <ClipCard
                 key={clip.id}
                 clip={clip}
-                onPlay={() => setActiveClip(clip)}
+                onPlay={() => { setTrimClip(null); setActiveClip(clip); }}
                 onExport={() => handleExport(clip)}
                 onDelete={() => handleDelete(clip)}
+                onTrim={() => { setActiveClip(null); setTrimClip(clip); }}
               />
             ))}
           </div>

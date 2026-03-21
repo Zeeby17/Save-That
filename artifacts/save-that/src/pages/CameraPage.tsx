@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { Settings, Images, Music, SwitchCamera, ChevronDown } from "lucide-react";
-import { AppIcon, Watermark } from "@/components/AppIcon";
+import { Settings, Images, Music, SwitchCamera, ChevronDown, Layers, Music2 } from "lucide-react";
+import { AppIcon } from "@/components/AppIcon";
 import { AudioVisualization } from "@/components/AudioVisualization";
 import { TimeSegmentButtons } from "@/components/TimeSegmentButtons";
+import { MediaPlayerOverlay, NowPlayingBar } from "@/components/MediaPlayerOverlay";
 import { useCamera, VideoQuality, CropMode } from "@/hooks/useCamera";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
 import { useSaveClips } from "@/hooks/useSaveClips";
@@ -34,10 +35,16 @@ function formatTime(s: number): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+function getBool(key: string, def: boolean) {
+  const v = localStorage.getItem(key);
+  return v !== null ? v === "true" : def;
+}
+
 export default function CameraPage() {
   const [, navigate] = useLocation();
   const bufferMinutes = parseInt(localStorage.getItem("bufferMinutes") || "10");
   const autoDownload = localStorage.getItem("autoDownload") === "true";
+  const customSeconds = parseInt(localStorage.getItem("customSaveSeconds") || "0");
 
   const {
     videoRef,
@@ -50,26 +57,44 @@ export default function CameraPage() {
     elapsedSeconds,
     mimeType,
     error,
+    isTimeLapse,
+    isDualCam,
+    toggleTimeLapse,
+    toggleDualCam,
     getChunks,
     getInitChunk,
     getStream,
     requestFlushAndGet,
   } = useCamera(bufferMinutes * 60);
 
+  // Persistent toggles from settings
   const [soundBarEnabled, setSoundBarEnabled] = useState(
-    () => localStorage.getItem("soundTimerBar") !== "false"
+    () => getBool("soundTimerBar", true)
   );
+  const [showMediaPlayer, setShowMediaPlayer] = useState(
+    () => getBool("showMediaPlayer", true)
+  );
+  const [showLocation, setShowLocation] = useState(
+    () => getBool("showLocation", false)
+  );
+  const [showNowPlaying, setShowNowPlaying] = useState(
+    () => getBool("showNowPlaying", false)
+  );
+
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showCropMenu, setShowCropMenu] = useState(false);
   const [saveFlash, setSaveFlash] = useState<string | null>(null);
+  const [mediaPlayerOpen, setMediaPlayerOpen] = useState(false);
+  const [locationText, setLocationText] = useState<string | null>(null);
+
+  const qualityRef = useRef<HTMLDivElement>(null);
+  const cropRef = useRef<HTMLDivElement>(null);
 
   const stream = getStream();
   const { audioData } = useAudioAnalysis(stream, soundBarEnabled && isRecording);
   const { saveLastSeconds } = useSaveClips(getChunks, getInitChunk, mimeType, requestFlushAndGet);
 
-  const qualityRef = useRef<HTMLDivElement>(null);
-  const cropRef = useRef<HTMLDivElement>(null);
-
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (qualityRef.current && !qualityRef.current.contains(e.target as Node))
@@ -81,17 +106,29 @@ export default function CameraPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Location overlay
+  useEffect(() => {
+    if (!showLocation) { setLocationText(null); return; }
+    const geo = navigator.geolocation;
+    if (!geo) { setLocationText("Location unavailable"); return; }
+    geo.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude.toFixed(4);
+        const lng = pos.coords.longitude.toFixed(4);
+        setLocationText(`${lat}° N  ${lng}° W`);
+      },
+      () => setLocationText("Location denied")
+    );
+  }, [showLocation]);
+
   const handleSave = (seconds: number) => {
     const label = seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
     setSaveFlash(`⏳ Saving last ${label}…`);
-
     saveLastSeconds(seconds, (success) => {
       if (success) {
         setSaveFlash(`✓ Saved last ${label}`);
         setTimeout(() => setSaveFlash(null), 2500);
-
         if (autoDownload) {
-          // Get the most recently saved clip and download it
           const clips = clipStorage.getAll();
           if (clips.length > 0) {
             const latest = clips[0];
@@ -127,7 +164,7 @@ export default function CameraPage() {
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 p-6">
             <div className="text-5xl">📷</div>
             <p className="text-center text-white/80 text-sm max-w-xs">
-              Camera access required. Please allow camera permissions and reload.
+              Camera access required. Allow camera permissions and reload.
             </p>
             <p className="text-xs text-red-400">{error}</p>
           </div>
@@ -142,16 +179,67 @@ export default function CameraPage() {
           />
         )}
 
-        {/* TOP LEFT: Watermark badge (imprinted on video like TikTok/Instagram) + rec timer */}
+        {/* TOP LEFT: Rec timer + watermark note */}
         <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start">
-          <Watermark />
+          {/* Logo in preview (watermark is ALSO burned into recorded video via canvas) */}
+          <div
+            className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 pointer-events-none"
+            style={{
+              background: "rgba(15,0,40,0.65)",
+              border: "1px solid rgba(255,140,0,0.4)",
+            }}
+          >
+            <AppIcon size={20} />
+            <span
+              style={{
+                fontFamily: "Impact, Arial Black, sans-serif",
+                fontSize: "14px",
+                color: "#6A0DAD",
+                WebkitTextStroke: "0.8px rgba(255,140,0,0.7)",
+                letterSpacing: "0.08em",
+                fontWeight: 900,
+              }}
+            >
+              SAVE THAT
+            </span>
+          </div>
           <div className="flex items-center gap-1.5 pl-1">
-            <span className="rec-dot w-2 h-2 rounded-full bg-red-500 inline-block" />
-            <span className="text-white/70 text-xs font-mono drop-shadow">{formatTime(elapsedSeconds)}</span>
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+            <span className="text-white/70 text-xs font-mono drop-shadow">
+              {formatTime(elapsedSeconds)}
+            </span>
+            {isTimeLapse && (
+              <span
+                className="text-xs font-bold px-1.5 py-0.5 rounded"
+                style={{ background: "#FFD700", color: "#1a0030" }}
+              >
+                TL 5fps
+              </span>
+            )}
+            {isDualCam && (
+              <span
+                className="text-xs font-bold px-1.5 py-0.5 rounded"
+                style={{ background: "rgba(255,255,255,0.2)", color: "white" }}
+              >
+                DUAL
+              </span>
+            )}
           </div>
         </div>
 
-        {/* TOP RIGHT: Quality + Crop */}
+        {/* LOCATION OVERLAY — top center */}
+        {showLocation && locationText && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none">
+            <div
+              className="px-3 py-1.5 rounded-xl text-xs text-white font-mono"
+              style={{ background: "rgba(15,0,40,0.65)", backdropFilter: "blur(8px)" }}
+            >
+              📍 {locationText}
+            </div>
+          </div>
+        )}
+
+        {/* TOP RIGHT: Quality + Crop dropdowns */}
         <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
           <div ref={qualityRef} className="relative">
             <button
@@ -173,7 +261,6 @@ export default function CameraPage() {
               </div>
             )}
           </div>
-
           <div ref={cropRef} className="relative">
             <button
               onClick={() => { setShowCropMenu((v) => !v); setShowQualityMenu(false); }}
@@ -196,18 +283,57 @@ export default function CameraPage() {
           </div>
         </div>
 
-        {/* BOTTOM LEFT on video: Sound bar toggle */}
-        <button onClick={toggleSoundBar}
-          className="absolute bottom-4 left-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
-          style={{ color: soundBarEnabled ? "#FFB800" : "rgba(255,255,255,0.5)" }}>
-          <Music className="w-5 h-5" />
-        </button>
+        {/* BOTTOM LEFT: Sound bar + media player button */}
+        <div className="absolute bottom-4 left-4 flex items-center gap-2">
+          <button
+            onClick={toggleSoundBar}
+            className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
+            style={{ color: soundBarEnabled ? "#FFB800" : "rgba(255,255,255,0.5)" }}
+          >
+            <Music className="w-5 h-5" />
+          </button>
+          {showMediaPlayer && (
+            <button
+              onClick={() => setMediaPlayerOpen((v) => !v)}
+              className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
+              style={{ color: mediaPlayerOpen ? "#FFB800" : "rgba(255,255,255,0.5)" }}
+              title="Mini media player"
+            >
+              <Music2 className="w-5 h-5" />
+            </button>
+          )}
+        </div>
 
-        {/* BOTTOM RIGHT on video: Switch camera */}
-        <button onClick={switchCamera}
-          className="absolute bottom-4 right-4 p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white">
-          <SwitchCamera className="w-5 h-5" />
-        </button>
+        {/* BOTTOM RIGHT: Switch camera + dual cam */}
+        <div className="absolute bottom-4 right-4 flex items-center gap-2">
+          <button
+            onClick={toggleDualCam}
+            className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
+            style={{ color: isDualCam ? "#FFB800" : "rgba(255,255,255,0.5)" }}
+            title="Dual camera split view"
+          >
+            <Layers className="w-5 h-5" />
+          </button>
+          <button
+            onClick={switchCamera}
+            className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white"
+          >
+            <SwitchCamera className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* NOW PLAYING BAR — bottom center, above controls */}
+        {showNowPlaying && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 w-max max-w-[80%] pointer-events-none">
+            <NowPlayingBar />
+          </div>
+        )}
+
+        {/* MEDIA PLAYER OVERLAY */}
+        <MediaPlayerOverlay
+          visible={mediaPlayerOpen}
+          onClose={() => setMediaPlayerOpen(false)}
+        />
 
         {/* SAVE FLASH */}
         {saveFlash && (
@@ -223,8 +349,15 @@ export default function CameraPage() {
         style={{ background: "linear-gradient(to bottom, #3C096C, #240046)" }}
       >
         {soundBarEnabled && <AudioVisualization audioData={audioData} />}
-        <TimeSegmentButtons onSave={handleSave} />
 
+        <TimeSegmentButtons
+          onSave={handleSave}
+          isTimeLapse={isTimeLapse}
+          onToggleTimeLapse={toggleTimeLapse}
+          customSeconds={customSeconds}
+        />
+
+        {/* NAV: settings left, clips right */}
         <div className="flex justify-between items-center mt-1">
           <button onClick={() => navigate("/settings")} className="p-2.5 rounded-full bg-black/50">
             <Settings className="w-5 h-5" style={{ color: "#FFB800" }} />

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Camera, RotateCcw, Save, Trash2, HardDrive, Download, Cloud } from "lucide-react";
+import { Camera, Images, RotateCcw, Save, Trash2, HardDrive, Download, Cloud, MapPin, Music2, Layout } from "lucide-react";
 import { AppIcon } from "@/components/AppIcon";
 import { clipStorage } from "@/utils/clipStorage";
 
@@ -50,7 +50,11 @@ const DEFAULTS = {
   maxClips: 50,
   notifications: true,
   soundTimerBar: true,
-  storageMode: "device", // "device" | "cloud" | "session"
+  storageMode: "device",
+  showMediaPlayer: true,
+  showLocation: false,
+  showNowPlaying: false,
+  customSaveSeconds: 0,
 };
 
 export default function SettingsPage() {
@@ -64,6 +68,11 @@ export default function SettingsPage() {
   const [notifications, setNotifications] = useState(() => getBool("notifications", DEFAULTS.notifications));
   const [soundTimerBar, setSoundTimerBar] = useState(() => getBool("soundTimerBar", DEFAULTS.soundTimerBar));
   const [storageMode, setStorageMode] = useState(() => localStorage.getItem("storageMode") || DEFAULTS.storageMode);
+  const [showMediaPlayer, setShowMediaPlayer] = useState(() => getBool("showMediaPlayer", DEFAULTS.showMediaPlayer));
+  const [showLocation, setShowLocation] = useState(() => getBool("showLocation", DEFAULTS.showLocation));
+  const [showNowPlaying, setShowNowPlaying] = useState(() => getBool("showNowPlaying", DEFAULTS.showNowPlaying));
+  const [customSaveSeconds, setCustomSaveSeconds] = useState(() => getNum("customSaveSeconds", DEFAULTS.customSaveSeconds));
+  const [customInput, setCustomInput] = useState(() => String(getNum("customSaveSeconds", DEFAULTS.customSaveSeconds) || ""));
   const [saved, setSaved] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -77,6 +86,12 @@ export default function SettingsPage() {
     localStorage.setItem("notifications", String(notifications));
     localStorage.setItem("soundTimerBar", String(soundTimerBar));
     localStorage.setItem("storageMode", storageMode);
+    localStorage.setItem("showMediaPlayer", String(showMediaPlayer));
+    localStorage.setItem("showLocation", String(showLocation));
+    localStorage.setItem("showNowPlaying", String(showNowPlaying));
+    const cust = Math.max(0, parseInt(customInput) || 0);
+    localStorage.setItem("customSaveSeconds", String(cust));
+    setCustomSaveSeconds(cust);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -91,6 +106,11 @@ export default function SettingsPage() {
     setNotifications(DEFAULTS.notifications);
     setSoundTimerBar(DEFAULTS.soundTimerBar);
     setStorageMode(DEFAULTS.storageMode);
+    setShowMediaPlayer(DEFAULTS.showMediaPlayer);
+    setShowLocation(DEFAULTS.showLocation);
+    setShowNowPlaying(DEFAULTS.showNowPlaying);
+    setCustomSaveSeconds(DEFAULTS.customSaveSeconds);
+    setCustomInput("");
   };
 
   const handleDeleteAll = () => {
@@ -119,28 +139,28 @@ export default function SettingsPage() {
   );
 
   const storageModes = [
-    { id: "device", label: "Phone / Download", icon: <HardDrive className="w-4 h-4" />, sub: "Auto-downloads .webm to your device on save" },
+    { id: "device", label: "Phone / Download", icon: <HardDrive className="w-4 h-4" />, sub: "Auto-downloads to your device on save" },
     { id: "session", label: "In-App Only", icon: <Download className="w-4 h-4" />, sub: "Clips stay in-app until you export manually" },
     { id: "cloud", label: "Cloud (Coming Soon)", icon: <Cloud className="w-4 h-4" />, sub: "Sign in to sync clips to your account" },
   ];
 
+  const customSec = parseInt(customInput) || 0;
+  const customLabel = customSec > 0
+    ? customSec < 60 ? `${customSec}s` : `${Math.floor(customSec / 60)}m${customSec % 60 > 0 ? ` ${customSec % 60}s` : ""}`
+    : null;
+
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "linear-gradient(to bottom, #240046, #10002B)" }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-5 pb-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <AppIcon size={22} />
-          <h1 className="font-black uppercase tracking-wide text-base"
-            style={{ color: "#7B2FBE", fontFamily: "Impact, Arial Black, sans-serif", WebkitTextStroke: "0.5px rgba(255,140,0,0.5)" }}>
-            SETTINGS
-          </h1>
-        </div>
-        <button onClick={() => navigate("/")} className="p-2 rounded-full bg-white/10">
-          <Camera className="w-5 h-5 text-white" />
-        </button>
+      {/* Header — no camera button here anymore */}
+      <div className="flex items-center gap-2 px-4 pt-5 pb-3 shrink-0">
+        <AppIcon size={22} />
+        <h1 className="font-black uppercase tracking-wide text-base"
+          style={{ color: "#7B2FBE", fontFamily: "Impact, Arial Black, sans-serif", WebkitTextStroke: "0.5px rgba(255,140,0,0.5)" }}>
+          SETTINGS
+        </h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
+      <div className="flex-1 overflow-y-auto px-4 pb-2">
 
         {/* STORAGE LOCATION */}
         <Section title="Storage Location">
@@ -149,10 +169,9 @@ export default function SettingsPage() {
               <button
                 key={mode.id}
                 onClick={() => {
-                  if (mode.id === "cloud") return; // coming soon
+                  if (mode.id === "cloud") return;
                   setStorageMode(mode.id);
-                  if (mode.id === "device") setAutoDownload(true);
-                  else setAutoDownload(false);
+                  setAutoDownload(mode.id === "device");
                 }}
                 className="flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-left"
                 style={{
@@ -201,7 +220,71 @@ export default function SettingsPage() {
           <Row label="Auto Save" sub="Automatically save at buffer interval"><Toggle value={autoSave} onChange={setAutoSave} /></Row>
         </Section>
 
-        {/* STORAGE MANAGEMENT */}
+        {/* CUSTOM SAVE TIME */}
+        <Section title="Custom Save Button">
+          <div className="px-4 py-4 flex flex-col gap-3">
+            <p className="text-xs text-white/45">
+              Sets the orange +Custom button on the camera screen. Enter seconds (e.g. 45 = 45s, 90 = 1m 30s).
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                max={3600}
+                placeholder="e.g. 45"
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                className="flex-1 rounded-xl px-3 py-2.5 text-sm font-bold text-white outline-none"
+                style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,140,0,0.3)" }}
+              />
+              {customLabel && (
+                <div
+                  className="px-3 py-2.5 rounded-xl text-sm font-bold"
+                  style={{ background: "#FF8C00", color: "white" }}
+                >
+                  + {customLabel}
+                </div>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        {/* OVERLAYS & DISPLAY */}
+        <Section title="Camera Overlays">
+          <Row
+            label="Location Display"
+            sub="Shows GPS coordinates on the video"
+          >
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4" style={{ color: showLocation ? "#FFB800" : "rgba(255,255,255,0.3)" }} />
+              <Toggle value={showLocation} onChange={setShowLocation} />
+            </div>
+          </Row>
+          <Row
+            label="Media Player Button"
+            sub="Show mini player controls while recording"
+          >
+            <div className="flex items-center gap-2">
+              <Music2 className="w-4 h-4" style={{ color: showMediaPlayer ? "#FFB800" : "rgba(255,255,255,0.3)" }} />
+              <Toggle value={showMediaPlayer} onChange={setShowMediaPlayer} />
+            </div>
+          </Row>
+          <Row
+            label="Now Playing Bar"
+            sub="Shows current song at bottom of video"
+          >
+            <div className="flex items-center gap-2">
+              <Layout className="w-4 h-4" style={{ color: showNowPlaying ? "#FFB800" : "rgba(255,255,255,0.3)" }} />
+              <Toggle value={showNowPlaying} onChange={setShowNowPlaying} />
+            </div>
+          </Row>
+          <Row label="Sound Timer Bar" sub="Audio frequency visualizer">
+            <Toggle value={soundTimerBar} onChange={setSoundTimerBar} />
+          </Row>
+          <Row label="Notifications"><Toggle value={notifications} onChange={setNotifications} /></Row>
+        </Section>
+
+        {/* CLIP MANAGEMENT */}
         <Section title="Clip Management">
           <Row label={`Max In-App Clips: ${maxClips}`}>
             <div className="w-28 shrink-0">
@@ -212,10 +295,7 @@ export default function SettingsPage() {
             <button
               onClick={handleDeleteAll}
               className="w-full py-2.5 rounded-xl text-sm font-bold transition-colors"
-              style={{
-                background: deleteConfirm ? "#CC0000" : "rgba(255,30,0,0.15)",
-                color: deleteConfirm ? "white" : "#FF6060",
-              }}
+              style={{ background: deleteConfirm ? "#CC0000" : "rgba(255,30,0,0.15)", color: deleteConfirm ? "white" : "#FF6060" }}
             >
               <span className="flex items-center justify-center gap-2">
                 <Trash2 className="w-4 h-4" />
@@ -225,14 +305,8 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        {/* PREFERENCES */}
-        <Section title="App Preferences">
-          <Row label="Sound Timer Bar" sub="Audio frequency visualizer"><Toggle value={soundTimerBar} onChange={setSoundTimerBar} /></Row>
-          <Row label="Notifications"><Toggle value={notifications} onChange={setNotifications} /></Row>
-        </Section>
-
-        {/* ACTION BUTTONS */}
-        <div className="flex gap-3">
+        {/* SAVE / RESET */}
+        <div className="flex gap-3 mb-4">
           <button
             onClick={handleSave}
             className="flex-1 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
@@ -251,10 +325,32 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {/* Beta note */}
-        <p className="text-center text-white/25 text-xs mt-6">
-          Save That — Beta · Clips are in-app only this session unless saved to device
+        <p className="text-center text-white/25 text-xs mb-2">
+          Save That — Beta · Watermark is burned into recorded video
         </p>
+      </div>
+
+      {/* BOTTOM NAV — Clips left, Camera right */}
+      <div
+        className="flex items-center justify-between px-6 py-3 shrink-0"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.08)", background: "rgba(10,0,30,0.6)" }}
+      >
+        <button
+          onClick={() => navigate("/clips")}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
+          style={{ background: "rgba(60,9,108,0.6)", color: "#FFB800" }}
+        >
+          <Images className="w-4 h-4" />
+          Clips
+        </button>
+        <button
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
+          style={{ background: "#FFB800", color: "#1a0030" }}
+        >
+          <Camera className="w-4 h-4" />
+          Camera
+        </button>
       </div>
     </div>
   );
