@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { Settings, Images, Music, SwitchCamera, ChevronDown, Layers, Music2 } from "lucide-react";
+import { Music, SwitchCamera, ChevronDown, Layers, Music2 } from "lucide-react";
 import { AppIcon } from "@/components/AppIcon";
 import { AudioVisualization } from "@/components/AudioVisualization";
 import { TimeSegmentButtons } from "@/components/TimeSegmentButtons";
+import { BottomNav } from "@/components/BottomNav";
 import { MediaPlayerOverlay, NowPlayingBar } from "@/components/MediaPlayerOverlay";
 import { useCamera, VideoQuality, CropMode } from "@/hooks/useCamera";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
 import { useSaveClips } from "@/hooks/useSaveClips";
+import { useSwipeNav } from "@/hooks/useSwipeNav";
 import { clipStorage } from "@/utils/clipStorage";
 
 const QUALITY_OPTIONS: VideoQuality[] = ["420p", "720p", "1080p", "4K"];
@@ -64,22 +66,14 @@ export default function CameraPage() {
     getChunks,
     getInitChunk,
     getStream,
+    getRecordingStart,
     requestFlushAndGet,
   } = useCamera(bufferMinutes * 60);
 
-  // Persistent toggles from settings
-  const [soundBarEnabled, setSoundBarEnabled] = useState(
-    () => getBool("soundTimerBar", true)
-  );
-  const [showMediaPlayer, setShowMediaPlayer] = useState(
-    () => getBool("showMediaPlayer", true)
-  );
-  const [showLocation, setShowLocation] = useState(
-    () => getBool("showLocation", false)
-  );
-  const [showNowPlaying, setShowNowPlaying] = useState(
-    () => getBool("showNowPlaying", false)
-  );
+  const [soundBarEnabled, setSoundBarEnabled] = useState(() => getBool("soundTimerBar", true));
+  const [showMediaPlayer, setShowMediaPlayer] = useState(() => getBool("showMediaPlayer", true));
+  const [showLocation] = useState(() => getBool("showLocation", false));
+  const [showNowPlaying] = useState(() => getBool("showNowPlaying", false));
 
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showCropMenu, setShowCropMenu] = useState(false);
@@ -92,9 +86,16 @@ export default function CameraPage() {
 
   const stream = getStream();
   const { audioData } = useAudioAnalysis(stream, soundBarEnabled && isRecording);
-  const { saveLastSeconds } = useSaveClips(getChunks, getInitChunk, mimeType, requestFlushAndGet);
+  const { saveLastSeconds } = useSaveClips(
+    getChunks, getInitChunk, mimeType, requestFlushAndGet, getRecordingStart
+  );
 
-  // Close dropdowns on outside click
+  // Swipe left → Saved Clips, swipe right → Settings
+  useSwipeNav({
+    onSwipeLeft: () => navigate("/clips"),
+    onSwipeRight: () => navigate("/settings"),
+  });
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (qualityRef.current && !qualityRef.current.contains(e.target as Node))
@@ -106,7 +107,6 @@ export default function CameraPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Location overlay
   useEffect(() => {
     if (!showLocation) { setLocationText(null); return; }
     const geo = navigator.geolocation;
@@ -120,6 +120,16 @@ export default function CameraPage() {
       () => setLocationText("Location denied")
     );
   }, [showLocation]);
+
+  // Reload preferences whenever page becomes visible (user may have changed settings)
+  useEffect(() => {
+    const refresh = () => {
+      setSoundBarEnabled(getBool("soundTimerBar", true));
+      setShowMediaPlayer(getBool("showMediaPlayer", true));
+    };
+    document.addEventListener("visibilitychange", refresh);
+    return () => document.removeEventListener("visibilitychange", refresh);
+  }, []);
 
   const handleSave = (seconds: number) => {
     const label = seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
@@ -179,15 +189,11 @@ export default function CameraPage() {
           />
         )}
 
-        {/* TOP LEFT: Rec timer + watermark note */}
+        {/* TOP LEFT: Watermark badge + rec timer */}
         <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start">
-          {/* Logo in preview (watermark is ALSO burned into recorded video via canvas) */}
           <div
             className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 pointer-events-none"
-            style={{
-              background: "rgba(15,0,40,0.65)",
-              border: "1px solid rgba(255,140,0,0.4)",
-            }}
+            style={{ background: "rgba(15,0,40,0.65)", border: "1px solid rgba(255,140,0,0.4)" }}
           >
             <AppIcon size={20} />
             <span
@@ -209,20 +215,12 @@ export default function CameraPage() {
               {formatTime(elapsedSeconds)}
             </span>
             {isTimeLapse && (
-              <span
-                className="text-xs font-bold px-1.5 py-0.5 rounded"
-                style={{ background: "#FFD700", color: "#1a0030" }}
-              >
-                TL 5fps
-              </span>
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded"
+                style={{ background: "#FFD700", color: "#1a0030" }}>TL 5fps</span>
             )}
             {isDualCam && (
-              <span
-                className="text-xs font-bold px-1.5 py-0.5 rounded"
-                style={{ background: "rgba(255,255,255,0.2)", color: "white" }}
-              >
-                DUAL
-              </span>
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded"
+                style={{ background: "rgba(255,255,255,0.2)", color: "white" }}>DUAL</span>
             )}
           </div>
         </div>
@@ -230,16 +228,14 @@ export default function CameraPage() {
         {/* LOCATION OVERLAY — top center */}
         {showLocation && locationText && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div
-              className="px-3 py-1.5 rounded-xl text-xs text-white font-mono"
-              style={{ background: "rgba(15,0,40,0.65)", backdropFilter: "blur(8px)" }}
-            >
+            <div className="px-3 py-1.5 rounded-xl text-xs text-white font-mono"
+              style={{ background: "rgba(15,0,40,0.65)", backdropFilter: "blur(8px)" }}>
               📍 {locationText}
             </div>
           </div>
         )}
 
-        {/* TOP RIGHT: Quality + Crop dropdowns */}
+        {/* TOP RIGHT: Quality + Crop */}
         <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
           <div ref={qualityRef} className="relative">
             <button
@@ -254,9 +250,7 @@ export default function CameraPage() {
                 {QUALITY_OPTIONS.map((q) => (
                   <button key={q} onClick={() => { setQuality(q); setShowQualityMenu(false); }}
                     className="block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors"
-                    style={{ color: q === quality ? "#FFB800" : "white" }}>
-                    {q}
-                  </button>
+                    style={{ color: q === quality ? "#FFB800" : "white" }}>{q}</button>
                 ))}
               </div>
             )}
@@ -274,55 +268,44 @@ export default function CameraPage() {
                 {CROP_OPTIONS.map((o) => (
                   <button key={o.value} onClick={() => { setCropMode(o.value); setShowCropMenu(false); }}
                     className="block w-full text-left px-4 py-2 text-sm hover:bg-white/10 transition-colors"
-                    style={{ color: o.value === cropMode ? "#FFB800" : "white" }}>
-                    {o.label}
-                  </button>
+                    style={{ color: o.value === cropMode ? "#FFB800" : "white" }}>{o.label}</button>
                 ))}
               </div>
             )}
           </div>
         </div>
 
-        {/* BOTTOM LEFT: Sound bar + media player button */}
+        {/* BOTTOM LEFT: Sound + Media Player */}
         <div className="absolute bottom-4 left-4 flex items-center gap-2">
-          <button
-            onClick={toggleSoundBar}
+          <button onClick={toggleSoundBar}
             className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
-            style={{ color: soundBarEnabled ? "#FFB800" : "rgba(255,255,255,0.5)" }}
-          >
+            style={{ color: soundBarEnabled ? "#FFB800" : "rgba(255,255,255,0.5)" }}>
             <Music className="w-5 h-5" />
           </button>
           {showMediaPlayer && (
             <button
               onClick={() => setMediaPlayerOpen((v) => !v)}
               className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
-              style={{ color: mediaPlayerOpen ? "#FFB800" : "rgba(255,255,255,0.5)" }}
-              title="Mini media player"
-            >
+              style={{ color: mediaPlayerOpen ? "#FFB800" : "rgba(255,255,255,0.5)" }}>
               <Music2 className="w-5 h-5" />
             </button>
           )}
         </div>
 
-        {/* BOTTOM RIGHT: Switch camera + dual cam */}
+        {/* BOTTOM RIGHT: Dual cam + Switch camera */}
         <div className="absolute bottom-4 right-4 flex items-center gap-2">
-          <button
-            onClick={toggleDualCam}
+          <button onClick={toggleDualCam}
             className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm"
-            style={{ color: isDualCam ? "#FFB800" : "rgba(255,255,255,0.5)" }}
-            title="Dual camera split view"
-          >
+            style={{ color: isDualCam ? "#FFB800" : "rgba(255,255,255,0.5)" }}>
             <Layers className="w-5 h-5" />
           </button>
-          <button
-            onClick={switchCamera}
-            className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white"
-          >
+          <button onClick={switchCamera}
+            className="p-2.5 rounded-full bg-black/50 backdrop-blur-sm text-white">
             <SwitchCamera className="w-5 h-5" />
           </button>
         </div>
 
-        {/* NOW PLAYING BAR — bottom center, above controls */}
+        {/* NOW PLAYING BAR */}
         {showNowPlaying && (
           <div className="absolute bottom-16 left-1/2 -translate-x-1/2 w-max max-w-[80%] pointer-events-none">
             <NowPlayingBar />
@@ -330,10 +313,7 @@ export default function CameraPage() {
         )}
 
         {/* MEDIA PLAYER OVERLAY */}
-        <MediaPlayerOverlay
-          visible={mediaPlayerOpen}
-          onClose={() => setMediaPlayerOpen(false)}
-        />
+        <MediaPlayerOverlay visible={mediaPlayerOpen} onClose={() => setMediaPlayerOpen(false)} />
 
         {/* SAVE FLASH */}
         {saveFlash && (
@@ -345,28 +325,20 @@ export default function CameraPage() {
 
       {/* PURPLE CONTROL BAR */}
       <div
-        className="flex flex-col gap-3 px-4 pt-3 pb-5 shrink-0"
+        className="flex flex-col gap-3 px-4 pt-3 pb-2 shrink-0"
         style={{ background: "linear-gradient(to bottom, #3C096C, #240046)" }}
       >
         {soundBarEnabled && <AudioVisualization audioData={audioData} />}
-
         <TimeSegmentButtons
           onSave={handleSave}
           isTimeLapse={isTimeLapse}
           onToggleTimeLapse={toggleTimeLapse}
           customSeconds={customSeconds}
         />
-
-        {/* NAV: settings left, clips right */}
-        <div className="flex justify-between items-center mt-1">
-          <button onClick={() => navigate("/settings")} className="p-2.5 rounded-full bg-black/50">
-            <Settings className="w-5 h-5" style={{ color: "#FFB800" }} />
-          </button>
-          <button onClick={() => navigate("/clips")} className="p-2.5 rounded-full bg-black/50">
-            <Images className="w-5 h-5" style={{ color: "#FFB800" }} />
-          </button>
-        </div>
       </div>
+
+      {/* SHARED BOTTOM NAV */}
+      <BottomNav current="camera" />
     </div>
   );
 }

@@ -10,44 +10,60 @@ const QUALITY_CONSTRAINTS: Record<VideoQuality, { width: number; height: number 
   "4K": { width: 3840, height: 2160 },
 };
 
+// Detect best MIME type per browser/device.
+// iPhone/Safari: must use MP4. Android Chrome: WebM VP8 (better keyframes than VP9).
 function detectMimeType(): string {
+  const ua = navigator.userAgent;
+  const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS|FxiOS/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  if (isSafari || isIOS) {
+    // Safari/iOS only supports MP4 in MediaRecorder
+    const iosCandidates = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1",
+      "video/mp4",
+    ];
+    for (const t of iosCandidates) {
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  // VP8 produces more keyframes than VP9 in MediaRecorder — better for editing
   const candidates = [
-    "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9,opus",
     "video/webm",
     "video/mp4",
   ];
-  for (const type of candidates) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
   }
   return "";
 }
 
-// Draw "SAVE THAT" brand watermark directly onto a canvas context at 50% opacity.
-// This burns the watermark into the recorded video — like TikTok/Instagram logos.
+// Draw "SAVE THAT" watermark onto a canvas context at 50% opacity.
+// Burned into the recorded video — like TikTok/Instagram logos.
 function drawWatermark(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.save();
   ctx.globalAlpha = 0.5;
 
   const bw = 154, bh = 40;
-  // Badge background
   ctx.fillStyle = "rgba(15, 0, 40, 0.72)";
   ctx.beginPath();
-  (ctx as CanvasRenderingContext2D & { roundRect: (...args: unknown[]) => void })
+  (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
     .roundRect(x, y, bw, bh, 9);
   ctx.fill();
   ctx.strokeStyle = "rgba(255, 140, 0, 0.5)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // Hourglass shape
+  // Hourglass shape (simplified)
   const hx = x + 8, hy = y + 4;
   ctx.fillStyle = "#FF8C00";
-  // Top cap
-  ctx.fillRect(hx - 1, hy, 20, 4);
-  // Bottom cap
-  ctx.fillRect(hx - 1, hy + 28, 20, 4);
-  // Top sand triangle
+  ctx.fillRect(hx - 1, hy, 20, 4);       // top cap
+  ctx.fillRect(hx - 1, hy + 28, 20, 4); // bottom cap
   ctx.beginPath();
   ctx.moveTo(hx, hy + 4);
   ctx.lineTo(hx + 18, hy + 4);
@@ -55,14 +71,12 @@ function drawWatermark(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.closePath();
   ctx.fillStyle = "#FFB800";
   ctx.fill();
-  // Bottom sand triangle
   ctx.beginPath();
   ctx.moveTo(hx, hy + 28);
   ctx.lineTo(hx + 18, hy + 28);
   ctx.lineTo(hx + 9, hy + 17);
   ctx.closePath();
   ctx.fill();
-  // Sand stream
   ctx.strokeStyle = "#FF6600";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -89,12 +103,15 @@ export function useCamera(bufferSeconds = 600) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pipStreamRef = useRef<MediaStream | null>(null);
-  const initChunkRef = useRef<Blob | null>(null);
+  // Store chunks with their recording timestamps
   const chunksRef = useRef<{ blob: Blob; time: number }[]>([]);
+  // Init chunk: codec + container headers — stored separately, prepended on every save
+  const initChunkRef = useRef<Blob | null>(null);
   const flushCallbackRef = useRef<(() => void) | null>(null);
-
   const isTimeLapseRef = useRef(false);
   const isDualCamRef = useRef(false);
+  // Track actual recording start so we can compute accurate durations
+  const recordingStartRef = useRef<number>(0);
 
   const [isRecording, setIsRecording] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
@@ -114,10 +131,10 @@ export function useCamera(bufferSeconds = 600) {
     }
   }, []);
 
-  // Start drawing camera frames to the recording canvas with watermark burned in.
   const startDrawLoop = useCallback(
     (canvas: HTMLCanvasElement, mainVid: HTMLVideoElement) => {
       stopDrawLoop();
+      const fps = isTimeLapseRef.current ? 5 : 30;
 
       const draw = () => {
         if (mainVid.readyState < 2) return;
@@ -129,7 +146,7 @@ export function useCamera(bufferSeconds = 600) {
         // Main camera frame
         ctx.drawImage(mainVid, 0, 0, w, h);
 
-        // Front-camera PiP in bottom-right corner when dual cam is on
+        // Front-camera PiP in bottom-right corner
         if (isDualCamRef.current && pipVideoRef.current && pipVideoRef.current.readyState >= 2) {
           const pw = w * 0.28;
           const ph = h * 0.28;
@@ -137,7 +154,7 @@ export function useCamera(bufferSeconds = 600) {
           const py = h - ph - 14;
           ctx.save();
           ctx.beginPath();
-          (ctx as CanvasRenderingContext2D & { roundRect: (...args: unknown[]) => void })
+          (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
             .roundRect(px, py, pw, ph, 12);
           ctx.clip();
           ctx.drawImage(pipVideoRef.current, px, py, pw, ph);
@@ -145,16 +162,15 @@ export function useCamera(bufferSeconds = 600) {
           ctx.strokeStyle = "rgba(255,255,255,0.55)";
           ctx.lineWidth = 2;
           ctx.beginPath();
-          (ctx as CanvasRenderingContext2D & { roundRect: (...args: unknown[]) => void })
+          (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void })
             .roundRect(px, py, pw, ph, 12);
           ctx.stroke();
         }
 
-        // Burn watermark at 50% opacity — top left, always present
+        // Watermark burned in at 50% opacity
         drawWatermark(ctx, 12, 12);
       };
 
-      const fps = isTimeLapseRef.current ? 5 : 30;
       drawIntervalRef.current = setInterval(draw, 1000 / fps);
     },
     [stopDrawLoop]
@@ -200,10 +216,10 @@ export function useCamera(bufferSeconds = 600) {
         canvas.width = cw;
         canvas.height = ch;
 
-        // Capture recording stream from canvas (video)
-        const canvasStream = canvas.captureStream(); // uncapped = browser handles fps
+        // Capture stream from canvas (video frames with watermark burned in)
+        const canvasStream = canvas.captureStream();
 
-        // Add audio tracks from the real camera stream
+        // Add audio from real camera (not from canvas — canvas has no audio)
         if (!isTimeLapseRef.current) {
           stream.getAudioTracks().forEach((t) => canvasStream.addTrack(t));
         }
@@ -211,7 +227,10 @@ export function useCamera(bufferSeconds = 600) {
         const mime = detectMimeType();
         setMimeType(mime);
 
-        const recorder = new MediaRecorder(canvasStream, mime ? { mimeType: mime } : {});
+        const recorder = new MediaRecorder(
+          canvasStream,
+          mime ? { mimeType: mime, videoBitsPerSecond: 2_500_000 } : {}
+        );
         mediaRecorderRef.current = recorder;
         chunksRef.current = [];
         initChunkRef.current = null;
@@ -220,14 +239,22 @@ export function useCamera(bufferSeconds = 600) {
         recorder.ondataavailable = (e) => {
           if (!e.data || e.data.size === 0) return;
           const now = Date.now();
+
           if (isFirstChunk) {
+            // First ondataavailable = codec init headers (+ first 500ms video)
+            // Store separately so we can prepend it on every save
             initChunkRef.current = e.data;
             isFirstChunk = false;
+            // Also store in chunks array so it participates in duration tracking
+            // (mark its time slightly before the second chunk will arrive)
+            recordingStartRef.current = now - 500;
           } else {
             chunksRef.current.push({ blob: e.data, time: now });
+            // Trim buffer to configured max
             const cutoff = now - bufferSeconds * 1000;
             chunksRef.current = chunksRef.current.filter((c) => c.time >= cutoff);
           }
+
           if (flushCallbackRef.current) {
             const cb = flushCallbackRef.current;
             flushCallbackRef.current = null;
@@ -235,11 +262,12 @@ export function useCamera(bufferSeconds = 600) {
           }
         };
 
+        // 500ms timeslice → 2 chunks/sec, less data loss at save time
         recorder.start(500);
         setIsRecording(true);
         setError(null);
 
-        // Start drawing loop AFTER recorder has started
+        // Start the draw loop after recorder is running
         if (videoRef.current) {
           startDrawLoop(canvas, videoRef.current);
         }
@@ -282,7 +310,6 @@ export function useCamera(bufferSeconds = 600) {
     const next = !isTimeLapseRef.current;
     isTimeLapseRef.current = next;
     setIsTimeLapse(next);
-    // Restart draw loop at new fps
     if (recordingCanvasRef.current && videoRef.current) {
       startDrawLoop(recordingCanvasRef.current, videoRef.current);
     }
@@ -290,18 +317,14 @@ export function useCamera(bufferSeconds = 600) {
 
   const toggleDualCam = useCallback(async () => {
     if (isDualCamRef.current) {
-      // Turn off
       isDualCamRef.current = false;
       setIsDualCam(false);
       if (pipStreamRef.current) {
         pipStreamRef.current.getTracks().forEach((t) => t.stop());
         pipStreamRef.current = null;
       }
-      if (pipVideoRef.current) {
-        pipVideoRef.current.srcObject = null;
-      }
+      if (pipVideoRef.current) pipVideoRef.current.srcObject = null;
     } else {
-      // Turn on — try to get the front camera
       try {
         const frontStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
@@ -324,28 +347,29 @@ export function useCamera(bufferSeconds = 600) {
     }
   }, []);
 
-  const requestFlushAndGet = useCallback(
-    (onFlushed: () => void) => {
-      const recorder = mediaRecorderRef.current;
-      if (!recorder || recorder.state !== "recording") {
+  // Flush uncommitted buffer data then call back.
+  // Fixes "clip cuts short" — forces MediaRecorder to emit its partial buffer.
+  const requestFlushAndGet = useCallback((onFlushed: () => void) => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== "recording") {
+      onFlushed();
+      return;
+    }
+    flushCallbackRef.current = onFlushed;
+    recorder.requestData();
+    // Safety timeout in case requestData() doesn't fire (shouldn't happen)
+    setTimeout(() => {
+      if (flushCallbackRef.current) {
+        flushCallbackRef.current = null;
         onFlushed();
-        return;
       }
-      flushCallbackRef.current = onFlushed;
-      recorder.requestData();
-      setTimeout(() => {
-        if (flushCallbackRef.current) {
-          flushCallbackRef.current = null;
-          onFlushed();
-        }
-      }, 300);
-    },
-    []
-  );
+    }, 400);
+  }, []);
 
   const getChunks = useCallback(() => chunksRef.current, []);
   const getInitChunk = useCallback(() => initChunkRef.current, []);
   const getStream = useCallback(() => streamRef.current, []);
+  const getRecordingStart = useCallback(() => recordingStartRef.current, []);
 
   useEffect(() => {
     startCamera();
@@ -387,6 +411,7 @@ export function useCamera(bufferSeconds = 600) {
     getChunks,
     getInitChunk,
     getStream,
+    getRecordingStart,
     requestFlushAndGet,
     startCamera,
     stopCamera,
